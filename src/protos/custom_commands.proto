@@ -1,0 +1,63 @@
+syntax = "proto3";
+package custom;
+
+enum Status {
+    Success = 0;
+    Fail = 1;
+}
+
+message StartCmd {
+}
+
+message StartResp {
+    Status status = 1;
+}
+
+message ConfigCmd {
+    oneof payload {
+        string api_url = 1;
+        string auth_url = 2;
+        string broker_url = 3;
+        string region = 4;
+        string random_text = 5;
+        string secure_random = 6;
+    }
+}
+
+message ConfigResp {
+    Status status = 1;
+}
+
+enum EventCommands {
+    EventGet = 0;
+    EventClearAll = 1;
+}
+
+message EventCmd {
+    EventCommands cmd = 1;
+}
+
+message EventResp {
+    string json = 1;
+    int32 number_of_events = 2;
+}
+
+message AddressCmd {
+}
+
+message AddressResp {
+    string mac_address = 1;
+}
+
+message CommandWrapper {
+    oneof payload {
+        StartCmd start_cmd = 1;
+        StartResp start_resp = 2;
+        ConfigCmd config_cmd = 3;
+        ConfigResp config_resp = 4;
+        EventCmd event_cmd = 5;
+        EventResp event_resp = 6;
+        AddressCmd address_cmd = 7;
+        AddressResp address_resp = 8;
+    }
+}
