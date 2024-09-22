@@ -198,7 +198,7 @@ impl Service {
     let event_response = custom_command_response.event_resp();
 
     Ok(Event {
-      json: serde_json::from_str(&event_response.json).unwrap(),
+      json: serde_json::from_str(&event_response.json).unwrap_or(serde_json::Value::Null),
       number_of_events: event_response.number_of_events,
     })
   }
