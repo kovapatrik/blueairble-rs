@@ -30,7 +30,13 @@ async fn main() {
   };
 
   service.set_configuration(config).await.unwrap();
-  service.wifi_connect(std::env::var("BLUEAIR_WIFI_SSID").unwrap().as_str(), std::env::var("BLUEAIR_WIFI_PASS").unwrap().as_str()).await.unwrap();
+  service
+    .wifi_connect(
+      std::env::var("BLUEAIR_WIFI_SSID").unwrap().as_str(),
+      std::env::var("BLUEAIR_WIFI_PASS").unwrap().as_str(),
+    )
+    .await
+    .unwrap();
 
   let events = service.get_all_event().await.unwrap();
   for event in events {
