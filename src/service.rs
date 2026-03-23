@@ -69,45 +69,12 @@ pub struct Configuration {
   pub secure_random: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum ConfigurationEntry {
-  ApiUrl,
-  AuthUrl,
-  BrokerUrl,
-  Region,
-  RandomText,
-  SecureRandom,
-}
-
-impl Configuration {
-  pub fn new(
-    api_url: String,
-    auth_url: String,
-    broker_url: String,
-    region: String,
-    random_text: String,
-    secure_random: String,
-  ) -> Self {
-    Self {
-      api_url,
-      auth_url,
-      broker_url,
-      region,
-      random_text,
-      secure_random,
-    }
-  }
-
-  pub fn values(&self) -> HashMap<ConfigurationEntry, String> {
-    let mut values = HashMap::new();
-    values.insert(ConfigurationEntry::ApiUrl, self.api_url.clone());
-    values.insert(ConfigurationEntry::AuthUrl, self.auth_url.clone());
-    values.insert(ConfigurationEntry::BrokerUrl, self.broker_url.clone());
-    values.insert(ConfigurationEntry::Region, self.region.clone());
-    values.insert(ConfigurationEntry::RandomText, self.random_text.clone());
-    values.insert(ConfigurationEntry::SecureRandom, self.secure_random.clone());
-    values
-  }
+#[derive(Debug, Clone)]
+pub struct FactoryConfiguration {
+  pub url: String,
+  pub ssid: String,
+  pub pwd: String,
+  pub token: String,
 }
 
 pub struct Service {
@@ -163,7 +130,6 @@ impl Service {
   }
 
   pub async fn get_event(&mut self) -> Result<Event> {
-
     let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
     let mut payload = protos::custom_commands::EventCmd::new();
     payload.cmd = EnumOrUnknown::new(protos::custom_commands::EventCommands::EventGet);
@@ -194,7 +160,8 @@ impl Service {
       .unwrap()
       .apply_keystream(read_value.as_mut());
 
-    let custom_command_response = protos::custom_commands::CommandWrapper::parse_from_bytes(&read_value).unwrap();
+    let custom_command_response =
+      protos::custom_commands::CommandWrapper::parse_from_bytes(&read_value).unwrap();
     let event_response = custom_command_response.event_resp();
 
     Ok(Event {
@@ -417,17 +384,18 @@ impl Service {
       ));
     }
 
-    for (field, value) in config.values() {
-      let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
-      let mut payload = protos::custom_commands::ConfigCmd::new();
+    let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
 
-      match field {
-        ConfigurationEntry::ApiUrl => payload.set_api_url(value),
-        ConfigurationEntry::AuthUrl => payload.set_auth_url(value),
-        ConfigurationEntry::BrokerUrl => payload.set_broker_url(value),
-        ConfigurationEntry::Region => payload.set_region(value),
-        ConfigurationEntry::RandomText => payload.set_random_text(value),
-        ConfigurationEntry::SecureRandom => payload.set_secure_random(value),
+    for i in 0..6 {
+      let mut payload = protos::custom_commands::ConfigCmd::new();
+      match i {
+        0 => payload.set_api_url(config.api_url.clone()),
+        1 => payload.set_auth_url(config.auth_url.clone()),
+        2 => payload.set_broker_url(config.broker_url.clone()),
+        3 => payload.set_region(config.region.clone()),
+        4 => payload.set_random_text(config.random_text.clone()),
+        5 => payload.set_secure_random(config.secure_random.clone()),
+        _ => {}
       }
 
       custom_command_packet.set_config_cmd(payload);
@@ -471,6 +439,164 @@ impl Service {
     }
 
     self.is_configured = true;
+
+    Ok(())
+  }
+
+  pub async fn set_factory(&mut self, config: FactoryConfiguration) -> Result<()> {
+    if self.cipher.is_none() {
+      return Err(btleplug::Error::RuntimeError(
+        "Cipher not initialized".to_string(),
+      ));
+    }
+
+    let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
+    let mut payload = protos::custom_commands::FactoryCmd::new();
+
+    payload.url = config.url;
+    payload.ssid = config.ssid;
+    payload.pwd = config.pwd;
+    payload.token = config.token;
+
+    custom_command_packet.set_factory_cmd(payload);
+
+    let mut custom_command_packet = custom_command_packet.write_to_bytes().unwrap();
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(custom_command_packet.as_mut());
+
+    self
+      .write_characteristic(
+        BlueAirCharacteristic::CustomEndpoint,
+        custom_command_packet.as_slice(),
+      )
+      .await?;
+
+    let mut read_value = self
+      .read_characteristic(BlueAirCharacteristic::CustomEndpoint)
+      .await?;
+
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(read_value.as_mut());
+
+    let custom_command_response =
+      protos::custom_commands::CommandWrapper::parse_from_bytes(&read_value).unwrap();
+    let factory_response = custom_command_response.factory_resp();
+    let status = factory_response.status.enum_value().unwrap();
+
+    if status != protos::custom_commands::Status::Success {
+      return Err(btleplug::Error::RuntimeError(format!(
+        "Factory response status: {:?}",
+        status
+      )));
+    }
+
+    Ok(())
+  }
+
+  pub async fn start(&mut self) -> Result<()> {
+    if self.cipher.is_none() {
+      return Err(btleplug::Error::RuntimeError(
+        "Cipher not initialized".to_string(),
+      ));
+    }
+
+    let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
+    let payload = protos::custom_commands::StartCmd::new();
+
+    custom_command_packet.set_start_cmd(payload);
+
+    let mut custom_command_packet = custom_command_packet.write_to_bytes().unwrap();
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(custom_command_packet.as_mut());
+
+    self
+      .write_characteristic(
+        BlueAirCharacteristic::CustomEndpoint,
+        custom_command_packet.as_slice(),
+      )
+      .await?;
+
+    let mut read_value = self
+      .read_characteristic(BlueAirCharacteristic::CustomEndpoint)
+      .await?;
+
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(read_value.as_mut());
+
+    let custom_command_response =
+      protos::custom_commands::CommandWrapper::parse_from_bytes(&read_value).unwrap();
+    let start_response = custom_command_response.start_resp();
+    let status = start_response.status.enum_value().unwrap();
+
+    if status != protos::custom_commands::Status::Success {
+      return Err(btleplug::Error::RuntimeError(format!(
+        "Start response status: {:?}",
+        status
+      )));
+    }
+
+    Ok(())
+  }
+
+  pub async fn stop(&mut self) -> Result<()> {
+    if self.cipher.is_none() {
+      return Err(btleplug::Error::RuntimeError(
+        "Cipher not initialized".to_string(),
+      ));
+    }
+
+    let mut custom_command_packet = protos::custom_commands::CommandWrapper::new();
+    let payload = protos::custom_commands::StopCmd::new();
+
+    custom_command_packet.set_stop_cmd(payload);
+
+    let mut custom_command_packet = custom_command_packet.write_to_bytes().unwrap();
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(custom_command_packet.as_mut());
+
+    self
+      .write_characteristic(
+        BlueAirCharacteristic::CustomEndpoint,
+        custom_command_packet.as_slice(),
+      )
+      .await?;
+
+    let mut read_value = self
+      .read_characteristic(BlueAirCharacteristic::CustomEndpoint)
+      .await?;
+
+    self
+      .cipher
+      .as_mut()
+      .unwrap()
+      .apply_keystream(read_value.as_mut());
+
+    let custom_command_response =
+      protos::custom_commands::CommandWrapper::parse_from_bytes(&read_value).unwrap();
+    let stop_response = custom_command_response.stop_resp();
+    let status = stop_response.status.enum_value().unwrap();
+
+    if status != protos::custom_commands::Status::Success {
+      return Err(btleplug::Error::RuntimeError(format!(
+        "Stop response status: {:?}",
+        status
+      )));
+    }
 
     Ok(())
   }
